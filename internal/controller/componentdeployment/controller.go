@@ -22,6 +22,11 @@ import (
 
 	openchoreov1alpha1 "github.com/openchoreo/openchoreo/api/v1alpha1"
 	"github.com/openchoreo/openchoreo/internal/controller"
+<<<<<<< HEAD
+=======
+	componentpipeline "github.com/openchoreo/openchoreo/internal/crd-renderer/component-pipeline"
+	pipelinecontext "github.com/openchoreo/openchoreo/internal/crd-renderer/component-pipeline/context"
+>>>>>>> 99b40644 (Add CRD renderer infrastructure and component rendering pipeline)
 	dpkubernetes "github.com/openchoreo/openchoreo/internal/dataplane/kubernetes"
 	"github.com/openchoreo/openchoreo/internal/labels"
 	componentpipeline "github.com/openchoreo/openchoreo/internal/pipeline/component"
@@ -245,6 +250,7 @@ func (r *Reconciler) reconcileRelease(ctx context.Context, componentDeployment *
 
 	// Prepare RenderInput
 	renderInput := &componentpipeline.RenderInput{
+<<<<<<< HEAD
 		ComponentTypeDefinition: &snapshot.Spec.ComponentTypeDefinition,
 		Component:               &snapshot.Spec.Component,
 		Addons:                  snapshot.Spec.Addons,
@@ -252,6 +258,11 @@ func (r *Reconciler) reconcileRelease(ctx context.Context, componentDeployment *
 		Environment:             snapshot.Spec.Environment,
 		ComponentDeployment:     componentDeployment,
 		Metadata:                metadataContext,
+=======
+		Snapshot:            snapshot,
+		ComponentDeployment: componentDeployment,
+		Metadata:            metadataContext,
+>>>>>>> 99b40644 (Add CRD renderer infrastructure and component rendering pipeline)
 	}
 
 	// Render resources using the shared pipeline instance

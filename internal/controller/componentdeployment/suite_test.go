@@ -23,7 +23,11 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/manager"
 
 	openchoreov1alpha1 "github.com/openchoreo/openchoreo/api/v1alpha1"
+<<<<<<< HEAD
 	componentpipeline "github.com/openchoreo/openchoreo/internal/pipeline/component"
+=======
+	componentpipeline "github.com/openchoreo/openchoreo/internal/crd-renderer/component-pipeline"
+>>>>>>> 99b40644 (Add CRD renderer infrastructure and component rendering pipeline)
 	// +kubebuilder:scaffold:imports
 )
 
