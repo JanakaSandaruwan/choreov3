@@ -202,3 +202,59 @@ func compareYAML(expected, actual string) error {
 	}
 	return nil
 }
+
+func TestIsMissingDataError(t *testing.T) {
+	engine := NewEngine()
+
+	tests := []struct {
+		name          string
+		expression    string
+		inputs        map[string]any
+		wantIsMissing bool
+	}{
+		{
+			name:          "missing map key - runtime error",
+			expression:    "${data.missingKey}",
+			inputs:        map[string]any{"data": map[string]any{"existingKey": "value"}},
+			wantIsMissing: true,
+		},
+		{
+			name:          "undeclared variable - compile error",
+			expression:    "${undeclaredVariable}",
+			inputs:        map[string]any{},
+			wantIsMissing: true,
+		},
+		{
+			name:          "valid expression - no error",
+			expression:    "${data.key}",
+			inputs:        map[string]any{"data": map[string]any{"key": "value"}},
+			wantIsMissing: false,
+		},
+		{
+			name:          "type error - not missing data",
+			expression:    "${1 + 'string'}",
+			inputs:        map[string]any{},
+			wantIsMissing: false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			_, err := engine.Render(tt.expression, tt.inputs)
+
+			if tt.wantIsMissing {
+				if err == nil {
+					t.Errorf("expected error but got none")
+					return
+				}
+				if !IsMissingDataError(err) {
+					t.Errorf("IsMissingDataError() = false, want true for error: %v", err)
+				}
+			} else {
+				if err != nil && IsMissingDataError(err) {
+					t.Errorf("IsMissingDataError() = true, want false for error: %v", err)
+				}
+			}
+		})
+	}
+}

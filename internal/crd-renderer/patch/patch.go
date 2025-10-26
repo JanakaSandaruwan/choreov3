@@ -6,6 +6,7 @@ package patch
 import (
 	"encoding/json"
 	"fmt"
+	"maps"
 	"regexp"
 	"strconv"
 	"strings"
@@ -13,60 +14,55 @@ import (
 	jsonpatch "github.com/evanphx/json-patch/v5"
 )
 
-// filterExpr recognises the `[?(@.field=='value')]` selectors used in array filter expressions.
+// filterExpr recognizes the `[?(@.field=='value')]` selectors used in array filter expressions.
 // The pattern captures the field path (group 1) and the expected value (group 2).
 // Example: `[?(@.name=='app')]` matches items where the 'name' field equals 'app'.
 var filterExpr = regexp.MustCompile(`^@\.([A-Za-z0-9_.-]+)\s*==\s*['"](.*)['"]$`)
 
 const opRemove = "remove"
 
-// RenderFunc evaluates CEL expressions within template values.
-// It takes a value (which may contain ${...} expressions) and a map of input variables,
-// and returns the rendered result with all CEL expressions evaluated.
-type RenderFunc func(value any, inputs map[string]any) (any, error)
-
-// MissingDataChecker determines if an error represents missing/unavailable template data.
-// This allows patch operations to gracefully skip resources when data is not yet available,
-// rather than failing the entire patch operation.
-type MissingDataChecker func(err error) bool
-
-// ApplyOperation applies a single patch operation against a target resource.
+// ApplyPatches applies a list of JSON Patch operations to a single resource.
 //
-// The function first evaluates the path and value using the provided render function,
-// which handles any CEL expressions like ${...}. It then routes the operation to the
-// appropriate handler based on the operation type.
+// This is the core, low-level patch function with a single responsibility:
+// apply operations to ONE resource. It does NOT handle:
+//   - Resource targeting (finding which resources to patch)
+//   - forEach iteration (applying to multiple items)
+//   - CEL rendering (operations should be pre-rendered)
+//   - Where clause filtering
+//
+// Those concerns are handled by higher-level orchestration code (e.g., addon processor).
 //
 // Supported operations:
 //   - RFC 6902 ops (add, replace, remove, test, move, copy): standard JSON Patch
 //   - mergeShallow: custom operation that overlays map keys without deep merging
-func ApplyOperation(target map[string]any, operation JSONPatchOperation, inputs map[string]any, render RenderFunc) error {
-	// Evaluate the path, which may contain CEL expressions
-	pathValue, err := render(operation.Path, inputs)
-	if err != nil {
-		return fmt.Errorf("failed to evaluate patch path: %w", err)
-	}
-
-	pathStr, ok := pathValue.(string)
-	if !ok {
-		return fmt.Errorf("patch path must evaluate to a string, got %T", pathValue)
-	}
-
-	// Evaluate the value, unless this is a remove operation
-	var value any
-	if operation.Op != opRemove {
-		value, err = render(operation.Value, inputs)
-		if err != nil {
-			return fmt.Errorf("failed to evaluate patch value: %w", err)
+//
+// Path expressions support:
+//   - Array filters: /containers[?(@.name=='app')]/env
+//   - Array indices: /containers/0/env
+//   - Append marker: /env/-
+//
+// The resource is modified in-place.
+func ApplyPatches(resource map[string]any, operations []JSONPatchOperation) error {
+	for i, operation := range operations {
+		if err := applyOperation(resource, operation); err != nil {
+			return fmt.Errorf("operation #%d failed: %w", i, err)
 		}
 	}
+	return nil
+}
+
+// applyOperation applies a single patch operation to a resource.
+func applyOperation(target map[string]any, operation JSONPatchOperation) error {
+	path := operation.Path
+	value := operation.Value
 
 	// Route to the appropriate operation handler
 	op := strings.ToLower(operation.Op)
 	switch op {
 	case "add", "replace", opRemove, "test", "move", "copy":
-		return applyRFC6902(target, op, pathStr, value)
+		return applyRFC6902(target, op, path, value)
 	case "mergeshallow":
-		return applyMergeShallow(target, pathStr, value)
+		return applyMergeShallow(target, path, value)
 	default:
 		return fmt.Errorf("unknown patch operation: %s", operation.Op)
 	}
@@ -115,9 +111,10 @@ func applyRFC6902(target map[string]any, op, rawPath string, value any) error {
 // when you want to replace a nested configuration block completely.
 //
 // Example:
-//   existing: {a: {x: 1, y: 2}, b: 3}
-//   overlay:  {a: {z: 3}}
-//   result:   {a: {z: 3}, b: 3}  // note: a.x and a.y are gone
+//
+//	existing: {a: {x: 1, y: 2}, b: 3}
+//	overlay:  {a: {z: 3}}
+//	result:   {a: {z: 3}, b: 3}  // note: a.x and a.y are gone
 func applyMergeShallow(target map[string]any, rawPath string, value any) error {
 	valueMap, ok := value.(map[string]any)
 	if !ok {
@@ -519,9 +516,7 @@ func applyJSONPatch(target map[string]any, op, pointer string, value any) error 
 	for k := range target {
 		delete(target, k)
 	}
-	for k, v := range updated {
-		target[k] = v
-	}
+	maps.Copy(target, updated)
 	return nil
 }
 
@@ -817,254 +812,4 @@ func deepCopySlice(src []any) []any {
 		}
 	}
 	return result
-}
-
-// ApplySpec executes a complete patch specification against a set of resources.
-//
-// The function handles:
-//   - Resource targeting based on Kind/Group/Version/Name
-//   - Optional forEach iteration over a list of items
-//   - Conditional filtering with target.where expressions
-//   - Multiple operations per target
-//   - Variable binding (resource, and forEach variable)
-//
-// Execution flow:
-//  1. Find target resources matching the spec.Target criteria
-//  2. If spec.ForEach is set, iterate over items and bind each to a variable
-//  3. For each iteration (or once if no forEach), filter targets using spec.Target.Where
-//  4. Apply all operations to matching targets
-//
-// Variable binding:
-//   - "resource" is automatically bound to the current target during where evaluation and operations
-//   - forEach variable (default name "item") is bound to the current iteration value
-//
-// Error handling:
-//   - If isMissingData returns true for an error during where evaluation, the target is skipped
-//   - Other errors during where evaluation or operation application are returned immediately
-func ApplySpec(
-	resources []map[string]any,
-	spec PatchSpec,
-	inputs map[string]any,
-	matcher Matcher,
-	render RenderFunc,
-	isMissingData MissingDataChecker,
-) error {
-	targets := FindTargetResources(resources, spec.Target, matcher)
-
-	if len(spec.Operations) == 0 {
-		return nil
-	}
-
-	// matchTarget evaluates the target.where condition against a resource.
-	// Temporarily binds the resource to the "resource" variable for CEL evaluation.
-	matchTarget := func(where string, target map[string]any, baseInputs map[string]any) (bool, error) {
-		if where == "" {
-			// No where clause means always match
-			return true, nil
-		}
-
-		// Bind the current resource for evaluation
-		previous, had := baseInputs["resource"]
-		baseInputs["resource"] = target
-
-		result, err := render(where, baseInputs)
-
-		// Restore previous resource binding
-		if had {
-			baseInputs["resource"] = previous
-		} else {
-			delete(baseInputs, "resource")
-		}
-
-		if err != nil {
-			// If this is a "missing data" error, treat as non-match rather than failure
-			if isMissingData != nil && isMissingData(err) {
-				return false, nil
-			}
-			return false, fmt.Errorf("failed to evaluate target.where: %w", err)
-		}
-
-		boolResult, ok := result.(bool)
-		if !ok {
-			return false, fmt.Errorf("target.where must evaluate to a boolean, got %T", result)
-		}
-		return boolResult, nil
-	}
-
-	// executeOperations runs all operations against a single target.
-	// Binds the target to "resource" during execution so operations can reference it.
-	executeOperations := func(target map[string]any, baseInputs map[string]any) error {
-		previous, had := baseInputs["resource"]
-		baseInputs["resource"] = target
-
-		for _, op := range spec.Operations {
-			if err := ApplyOperation(target, op, baseInputs, render); err != nil {
-				// Restore resource binding before returning error
-				if had {
-					baseInputs["resource"] = previous
-				} else {
-					delete(baseInputs, "resource")
-				}
-				return err
-			}
-		}
-
-		// Restore resource binding after all operations
-		if had {
-			baseInputs["resource"] = previous
-		} else {
-			delete(baseInputs, "resource")
-		}
-		return nil
-	}
-
-	// Handle forEach iteration if specified
-	if spec.ForEach != "" {
-		// Evaluate the forEach expression to get the list of items
-		itemsRaw, err := render(spec.ForEach, inputs)
-		if err != nil {
-			return fmt.Errorf("failed to evaluate patch forEach expression: %w", err)
-		}
-
-		items, ok := itemsRaw.([]any)
-		if !ok {
-			return fmt.Errorf("forEach expression must evaluate to an array, got %T", itemsRaw)
-		}
-
-		// Determine the variable name for each iteration (defaults to "item")
-		varName := spec.Var
-		if varName == "" {
-			varName = "item"
-		}
-
-		// Save any existing value for this variable to restore later
-		previous, hadVar := inputs[varName]
-
-		// Iterate through each item
-		for _, item := range items {
-			// Bind the current item to the variable
-			inputs[varName] = item
-
-			// Apply operations to all matching targets for this item
-			for _, target := range targets {
-				match, err := matchTarget(spec.Target.Where, target, inputs)
-				if err != nil {
-					// Restore variable binding before returning
-					if hadVar {
-						inputs[varName] = previous
-					} else {
-						delete(inputs, varName)
-					}
-					return err
-				}
-				if !match {
-					continue
-				}
-				if err := executeOperations(target, inputs); err != nil {
-					// Restore variable binding before returning
-					if hadVar {
-						inputs[varName] = previous
-					} else {
-						delete(inputs, varName)
-					}
-					return err
-				}
-			}
-		}
-
-		// Restore the original variable binding
-		if hadVar {
-			inputs[varName] = previous
-		} else {
-			delete(inputs, varName)
-		}
-		return nil
-	}
-
-	// No forEach - apply operations once to all matching targets
-	for _, target := range targets {
-		match, err := matchTarget(spec.Target.Where, target, inputs)
-		if err != nil {
-			return err
-		}
-		if !match {
-			continue
-		}
-		if err := executeOperations(target, inputs); err != nil {
-			return err
-		}
-	}
-
-	return nil
-}
-
-// FindTargetResources filters resources based on Kind, Group, Version, and Name.
-//
-// Matching is done in order:
-//  1. If target.Kind is set, resource.kind must match
-//  2. If target.Group is set, the group portion of resource.apiVersion must match
-//  3. If target.Version is set, the version portion of resource.apiVersion must match
-//  4. If target.Name is set, resource.metadata.name must match
-//
-// An empty field in the target spec means "match any value".
-//
-// apiVersion is split into group/version:
-//   - "apps/v1" → group="apps", version="v1"
-//   - "v1" → group="", version="v1" (core API)
-func FindTargetResources(resources []map[string]any, target TargetSpec, selector Matcher) []map[string]any {
-	matches := make([]map[string]any, 0, len(resources))
-	for _, resource := range resources {
-		// Match Kind
-		if target.Kind != "" {
-			if kind, ok := resource["kind"].(string); !ok || kind != target.Kind {
-				continue
-			}
-		}
-
-		// Match Group and Version (extracted from apiVersion)
-		group := ""
-		version := ""
-		if gv, ok := resource["apiVersion"].(string); ok {
-			group, version = splitAPIVersion(gv)
-		}
-		if target.Group != "" && group != target.Group {
-			continue
-		}
-		if target.Version != "" && version != target.Version {
-			continue
-		}
-
-		// Match Name (from metadata)
-		if target.Name != "" {
-			metadata, _ := resource["metadata"].(map[string]any)
-			if metadata == nil || metadata["name"] != target.Name {
-				continue
-			}
-		}
-
-		matches = append(matches, resource)
-	}
-	return matches
-}
-
-// Matcher evaluates if a resource satisfies a selector expression.
-// This is a function type allowing custom selection logic to be plugged in.
-type Matcher func(resource map[string]any, selector string) bool
-
-// splitAPIVersion separates a Kubernetes apiVersion into group and version parts.
-//
-// Examples:
-//   - "apps/v1" → ("apps", "v1")
-//   - "v1" → ("", "v1")         // Core API group
-//   - "" → ("", "")
-func splitAPIVersion(apiVersion string) (group, version string) {
-	if apiVersion == "" {
-		return "", ""
-	}
-	if strings.Contains(apiVersion, "/") {
-		parts := strings.SplitN(apiVersion, "/", 2)
-		return parts[0], parts[1]
-	}
-	// No slash means it's a core API (e.g., "v1")
-	return "", apiVersion
 }

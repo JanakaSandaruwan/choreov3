@@ -5,25 +5,21 @@ package patch
 
 import (
 	"encoding/json"
-	"errors"
 	"testing"
 
 	"github.com/google/go-cmp/cmp"
 	"sigs.k8s.io/yaml"
 )
 
-func TestApplyPatch(t *testing.T) {
+func TestApplyPatches(t *testing.T) {
 	t.Parallel()
-
-	render := func(v any, _ map[string]any) (any, error) {
-		return v, nil
-	}
 
 	tests := []struct {
 		name       string
 		initial    string
 		operations []JSONPatchOperation
 		want       string
+		wantErr    bool
 	}{
 		{
 			name: "add env entry via array filter",
@@ -212,6 +208,24 @@ spec:
 `,
 		},
 		{
+			name: "test operation failure",
+			initial: `
+spec:
+  template:
+    metadata:
+      annotations:
+        existing: "true"
+`,
+			operations: []JSONPatchOperation{
+				{
+					Op:    "test",
+					Path:  "/spec/template/metadata/annotations/existing",
+					Value: "false",
+				},
+			},
+			wantErr: true,
+		},
+		{
 			name: "add env entry for multiple matches",
 			initial: `
 spec:
@@ -252,6 +266,54 @@ spec:
               value: "true"
 `,
 		},
+		{
+			name: "add to non-existent path creates parent",
+			initial: `
+spec:
+  template:
+    spec: {}
+`,
+			operations: []JSONPatchOperation{
+				{
+					Op:   "add",
+					Path: "/spec/template/spec/containers/-",
+					Value: map[string]any{
+						"name":  "app",
+						"image": "app:v1",
+					},
+				},
+			},
+			want: `
+spec:
+  template:
+    spec:
+      containers:
+        - name: app
+          image: app:v1
+`,
+		},
+		{
+			name: "array filter with no matches is a no-op",
+			initial: `
+spec:
+  containers:
+    - name: app
+      image: app:v1
+`,
+			operations: []JSONPatchOperation{
+				{
+					Op:    "replace",
+					Path:  "/spec/containers/[?(@.name=='nonexistent')]/image",
+					Value: "app:v2",
+				},
+			},
+			want: `
+spec:
+  containers:
+    - name: app
+      image: app:v1
+`,
+		},
 	}
 
 	for _, tt := range tests {
@@ -263,10 +325,17 @@ spec:
 				t.Fatalf("failed to unmarshal initial YAML: %v", err)
 			}
 
-			for _, op := range tt.operations {
-				if err := ApplyOperation(resource, op, nil, render); err != nil {
-					t.Fatalf("ApplyOperation error = %v", err)
+			err := ApplyPatches(resource, tt.operations)
+
+			if tt.wantErr {
+				if err == nil {
+					t.Fatal("expected error but got nil")
 				}
+				return
+			}
+
+			if err != nil {
+				t.Fatalf("ApplyPatches error = %v", err)
 			}
 
 			var wantObj map[string]any
@@ -278,245 +347,6 @@ spec:
 				t.Fatalf("resource mismatch (-want +got):\n%s", diff)
 			}
 		})
-	}
-}
-
-func TestApplyPatchTestOpFailure(t *testing.T) {
-	render := func(v any, _ map[string]any) (any, error) {
-		return v, nil
-	}
-
-	initial := `
-spec:
-  template:
-    metadata:
-      annotations:
-        existing: "true"
-`
-
-	var resource map[string]any
-	if err := yaml.Unmarshal([]byte(initial), &resource); err != nil {
-		t.Fatalf("failed to unmarshal initial YAML: %v", err)
-	}
-
-	op := JSONPatchOperation{
-		Op:    "test",
-		Path:  "/spec/template/metadata/annotations/existing",
-		Value: "false",
-	}
-
-	if err := ApplyOperation(resource, op, nil, render); err == nil {
-		t.Fatalf("expected test operation to fail but succeeded")
-	}
-}
-
-func TestApplySpec_ForEachAndWhere(t *testing.T) {
-	t.Parallel()
-
-	resources := []map[string]any{
-		{
-			"apiVersion": "apps/v1",
-			"kind":       "Deployment",
-			"metadata": map[string]any{
-				"name": "api",
-				"annotations": map[string]any{
-					"owner": "platform",
-				},
-			},
-		},
-		{
-			"apiVersion": "apps/v1",
-			"kind":       "Deployment",
-			"metadata": map[string]any{
-				"name": "worker",
-				"annotations": map[string]any{
-					"owner": "ops",
-				},
-			},
-		},
-	}
-
-	spec := PatchSpec{
-		ForEach: "addons",
-		Var:     "addon",
-		Target: TargetSpec{
-			Kind:  "Deployment",
-			Where: "match-addon-name",
-		},
-		Operations: []JSONPatchOperation{
-			{
-				Op:    "mergeShallow",
-				Path:  "/metadata/annotations",
-				Value: "annotationValue",
-			},
-		},
-	}
-
-	render := func(expr any, inputs map[string]any) (any, error) {
-		switch v := expr.(type) {
-		case string:
-			switch v {
-			case "addons":
-				return []any{
-					map[string]any{"name": "api", "key": "team", "value": "platform"},
-					map[string]any{"name": "worker", "key": "team", "value": "ops"},
-				}, nil
-			case "annotationValue":
-				addon := inputs["addon"].(map[string]any)
-				key := addon["key"].(string)
-				return map[string]any{key: addon["value"]}, nil
-			case "match-addon-name":
-				addon := inputs["addon"].(map[string]any)
-				resource := inputs["resource"].(map[string]any)
-				metadata, _ := resource["metadata"].(map[string]any)
-				name, _ := metadata["name"].(string)
-				return name == addon["name"], nil
-			default:
-				return v, nil
-			}
-		default:
-			return expr, nil
-		}
-	}
-
-	err := ApplySpec(resources, spec, map[string]any{}, func(map[string]any, string) bool { return true }, render, nil)
-	if err != nil {
-		t.Fatalf("ApplySpec error = %v", err)
-	}
-
-	expected := []map[string]any{
-		{
-			"apiVersion": "apps/v1",
-			"kind":       "Deployment",
-			"metadata": map[string]any{
-				"name": "api",
-				"annotations": map[string]any{
-					"owner": "platform",
-					"team":  "platform",
-				},
-			},
-		},
-		{
-			"apiVersion": "apps/v1",
-			"kind":       "Deployment",
-			"metadata": map[string]any{
-				"name": "worker",
-				"annotations": map[string]any{
-					"owner": "ops",
-					"team":  "ops",
-				},
-			},
-		},
-	}
-
-	if diff := cmp.Diff(expected, resources); diff != "" {
-		t.Fatalf("resources mismatch (-want +got):\n%s", diff)
-	}
-}
-
-func TestApplySpec_SkipsMissingData(t *testing.T) {
-	t.Parallel()
-
-	errMissing := errors.New("missing data")
-
-	resources := []map[string]any{
-		{
-			"metadata": map[string]any{
-				"name": "api",
-				"annotations": map[string]any{
-					"owner": "platform",
-				},
-			},
-		},
-		{
-			"metadata": map[string]any{
-				"name": "worker",
-				"annotations": map[string]any{
-					"owner": "ops",
-				},
-			},
-		},
-	}
-
-	spec := PatchSpec{
-		ForEach: "addons",
-		Var:     "addon",
-		Target: TargetSpec{
-			Where: "match-addon-name",
-		},
-		Operations: []JSONPatchOperation{
-			{
-				Op:    "mergeShallow",
-				Path:  "/metadata/annotations",
-				Value: "annotationValue",
-			},
-		},
-	}
-
-	render := func(expr any, inputs map[string]any) (any, error) {
-		switch v := expr.(type) {
-		case string:
-			switch v {
-			case "addons":
-				return []any{
-					map[string]any{"name": "api", "key": "team", "value": "platform"},
-					map[string]any{"name": "worker", "key": "team", "value": "ops"},
-				}, nil
-			case "annotationValue":
-				addon := inputs["addon"].(map[string]any)
-				key := addon["key"].(string)
-				return map[string]any{key: addon["value"]}, nil
-			case "match-addon-name":
-				addon := inputs["addon"].(map[string]any)
-				resource := inputs["resource"].(map[string]any)
-				metadata, _ := resource["metadata"].(map[string]any)
-				name, _ := metadata["name"].(string)
-				if name == "worker" {
-					return nil, errMissing
-				}
-				return name == addon["name"], nil
-			default:
-				return v, nil
-			}
-		default:
-			return expr, nil
-		}
-	}
-
-	err := ApplySpec(
-		resources,
-		spec,
-		map[string]any{},
-		func(map[string]any, string) bool { return true },
-		render,
-		func(err error) bool { return errors.Is(err, errMissing) },
-	)
-	if err != nil {
-		t.Fatalf("ApplySpec error = %v", err)
-	}
-
-	expected := []map[string]any{
-		{
-			"metadata": map[string]any{
-				"name": "api",
-				"annotations": map[string]any{
-					"owner": "platform",
-					"team":  "platform",
-				},
-			},
-		},
-		{
-			"metadata": map[string]any{
-				"name": "worker",
-				"annotations": map[string]any{
-					"owner": "ops",
-				},
-			},
-		},
-	}
-
-	if diff := cmp.Diff(expected, resources); diff != "" {
-		t.Fatalf("resources mismatch (-want +got):\n%s", diff)
 	}
 }
 

@@ -136,7 +136,7 @@ func sortRequiredFields(schema *extv1.JSONSchemaProps) {
 		return
 	}
 	if len(schema.Required) > 0 {
-		// Keep output deterministic for CLI/UI generators and to minimise diffs when definitions change.
+		// Keep output deterministic for CLI/UI generators and to minimize diffs when definitions change.
 		sort.Strings(schema.Required)
 	}
 	if schema.Properties != nil {
