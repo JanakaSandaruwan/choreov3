@@ -10,6 +10,7 @@ import (
 	"sigs.k8s.io/yaml"
 
 	"github.com/openchoreo/openchoreo/api/v1alpha1"
+	"github.com/openchoreo/openchoreo/internal/crd-renderer/component-pipeline/context"
 )
 
 func TestPipeline_Render(t *testing.T) {
@@ -348,6 +349,14 @@ spec:
 			input := &RenderInput{
 				Snapshot: snapshot,
 				Settings: settings,
+				Metadata: context.MetadataContext{
+					Name:      "test-component-dev-12345678",
+					Namespace: "test-namespace",
+					Labels: map[string]string{
+						"openchoreo.org/component":   "test-component",
+						"openchoreo.org/environment": "dev",
+					},
+				},
 			}
 
 			// Create pipeline and render
@@ -474,6 +483,14 @@ spec:
 			// Create input
 			input := &RenderInput{
 				Snapshot: snapshot,
+				Metadata: context.MetadataContext{
+					Name:      "test-component-dev-12345678",
+					Namespace: "test-namespace",
+					Labels: map[string]string{
+						"openchoreo.org/component":   "test-component",
+						"openchoreo.org/environment": "dev",
+					},
+				},
 			}
 
 			// Create pipeline with options

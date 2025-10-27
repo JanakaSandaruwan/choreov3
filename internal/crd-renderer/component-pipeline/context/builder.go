@@ -15,10 +15,11 @@ import (
 
 // BuildFromSnapshot builds a component context directly from a ComponentEnvSnapshot.
 // This is a convenience function that extracts the necessary data from the snapshot.
+// The controller must provide the computed metadata context.
 func BuildFromSnapshot(
 	snapshot *v1alpha1.ComponentEnvSnapshot,
 	settings *v1alpha1.EnvSettings,
-	additionalMetadata map[string]string,
+	metadata MetadataContext,
 ) (map[string]any, error) {
 	if snapshot == nil {
 		return nil, fmt.Errorf("snapshot is nil")
@@ -30,7 +31,7 @@ func BuildFromSnapshot(
 		Workload:                &snapshot.Spec.Workload,
 		Environment:             snapshot.Spec.Environment,
 		EnvSettings:             settings,
-		AdditionalMetadata:      additionalMetadata,
+		Metadata:                metadata,
 	}
 
 	return BuildComponentContext(input)
@@ -38,12 +39,13 @@ func BuildFromSnapshot(
 
 // BuildAddonFromSnapshot builds an addon context for a specific addon instance from a snapshot.
 // This is a convenience function for processing addons in a ComponentEnvSnapshot.
+// The controller must provide the computed metadata context.
 func BuildAddonFromSnapshot(
 	snapshot *v1alpha1.ComponentEnvSnapshot,
 	addon *v1alpha1.Addon,
 	instance v1alpha1.ComponentAddon,
 	settings *v1alpha1.EnvSettings,
-	additionalMetadata map[string]string,
+	metadata MetadataContext,
 ) (map[string]any, error) {
 	if snapshot == nil {
 		return nil, fmt.Errorf("snapshot is nil")
@@ -53,12 +55,12 @@ func BuildAddonFromSnapshot(
 	}
 
 	input := &AddonContextInput{
-		Addon:              addon,
-		Instance:           instance,
-		Component:          &snapshot.Spec.Component,
-		Environment:        snapshot.Spec.Environment,
-		EnvSettings:        settings,
-		AdditionalMetadata: additionalMetadata,
+		Addon:       addon,
+		Instance:    instance,
+		Component:   &snapshot.Spec.Component,
+		Environment: snapshot.Spec.Environment,
+		EnvSettings: settings,
+		Metadata:    metadata,
 	}
 
 	return BuildAddonContext(input)

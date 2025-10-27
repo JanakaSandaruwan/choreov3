@@ -54,6 +54,7 @@ import (
 	"github.com/openchoreo/openchoreo/internal/controller/webapplicationbinding"
 	"github.com/openchoreo/openchoreo/internal/controller/webapplicationclass"
 	"github.com/openchoreo/openchoreo/internal/controller/workload"
+	componentpipeline "github.com/openchoreo/openchoreo/internal/crd-renderer/component-pipeline"
 	argo "github.com/openchoreo/openchoreo/internal/dataplane/kubernetes/types/argoproj.io/workflow/v1alpha1"
 	ciliumv2 "github.com/openchoreo/openchoreo/internal/dataplane/kubernetes/types/cilium.io/v2"
 	csisecretv1 "github.com/openchoreo/openchoreo/internal/dataplane/kubernetes/types/secretstorecsi/v1"
@@ -279,8 +280,9 @@ func main() {
 
 	// EnvSettings controller
 	if err = (&envsettings.Reconciler{
-		Client: mgr.GetClient(),
-		Scheme: mgr.GetScheme(),
+		Client:   mgr.GetClient(),
+		Scheme:   mgr.GetScheme(),
+		Pipeline: componentpipeline.NewPipeline(),
 	}).SetupWithManager(mgr); err != nil {
 		setupLog.Error(err, "unable to create controller", "controller", "EnvSettings")
 		os.Exit(1)

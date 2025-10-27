@@ -161,6 +161,15 @@ func (p *Pipeline) validateInput(input *RenderInput) error {
 	if input.Snapshot.Spec.ComponentTypeDefinition.Spec.Resources == nil {
 		return fmt.Errorf("component type definition has no resources")
 	}
+
+	// Validate metadata context
+	if input.Metadata.Name == "" {
+		return fmt.Errorf("metadata.name is required")
+	}
+	if input.Metadata.Namespace == "" {
+		return fmt.Errorf("metadata.namespace is required")
+	}
+
 	return nil
 }
 

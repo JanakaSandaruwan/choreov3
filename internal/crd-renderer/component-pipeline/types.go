@@ -5,6 +5,7 @@ package componentpipeline
 
 import (
 	"github.com/openchoreo/openchoreo/api/v1alpha1"
+	"github.com/openchoreo/openchoreo/internal/crd-renderer/component-pipeline/context"
 	"github.com/openchoreo/openchoreo/internal/crd-renderer/template"
 )
 
@@ -26,10 +27,9 @@ type RenderInput struct {
 	// Optional - if nil, no environment overrides are applied.
 	Settings *v1alpha1.EnvSettings
 
-	// Metadata contains additional metadata to include in rendered resources.
-	// This can include labels, annotations, or other contextual information.
-	// Optional.
-	Metadata map[string]string
+	// Metadata provides structured naming information.
+	// Required - controller must compute and provide this.
+	Metadata context.MetadataContext
 }
 
 // RenderOutput contains the results of the rendering process.

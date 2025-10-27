@@ -10,6 +10,34 @@ import (
 	"github.com/openchoreo/openchoreo/api/v1alpha1"
 )
 
+// MetadataContext provides structured metadata for resource generation.
+// This is computed by the controller and passed to the renderer.
+type MetadataContext struct {
+	// Name is the base name to use for generated resources.
+	// Example: "my-service-dev-a1b2c3d4"
+	Name string
+
+	// Namespace is the target namespace for the resources.
+	// Example: "dp-acme-corp-payment-dev-x1y2z3w4"
+	Namespace string
+
+	// Labels are common labels to add to all resources.
+	// Example: {"openchoreo.org/component": "my-service", ...}
+	Labels map[string]string
+
+	// Annotations are common annotations to add to all resources.
+	Annotations map[string]string
+
+	// PodSelectors are platform-injected selectors for pod identity.
+	// Used in Deployment selectors, Service selectors, etc.
+	// Example: {
+	//   "openchoreo.org/component-id": "abc123",
+	//   "openchoreo.org/environment": "dev",
+	//   "openchoreo.org/project-id": "xyz789",
+	// }
+	PodSelectors map[string]string
+}
+
 // ComponentContextInput contains all inputs needed to build a component rendering context.
 type ComponentContextInput struct {
 	// Component is the component definition.
@@ -28,8 +56,9 @@ type ComponentContextInput struct {
 	// Environment is the name of the environment being rendered for.
 	Environment string
 
-	// AdditionalMetadata contains extra contextual information.
-	AdditionalMetadata map[string]string
+	// Metadata provides structured naming and labeling information.
+	// Required - controller must provide this.
+	Metadata MetadataContext
 }
 
 // AddonContextInput contains all inputs needed to build an addon rendering context.
@@ -50,8 +79,9 @@ type AddonContextInput struct {
 	// Environment is the name of the environment being rendered for.
 	Environment string
 
-	// AdditionalMetadata contains extra contextual information.
-	AdditionalMetadata map[string]string
+	// Metadata provides structured naming and labeling information.
+	// Required - controller must provide this.
+	Metadata MetadataContext
 }
 
 // SchemaInput contains schema information for applying defaults.

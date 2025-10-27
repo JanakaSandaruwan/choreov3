@@ -5,14 +5,13 @@ package envsettings
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"strings"
 
-	corev1 "k8s.io/api/core/v1"
 	apiequality "k8s.io/apimachinery/pkg/api/equality"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/types"
 	kerrors "k8s.io/apimachinery/pkg/util/errors"
@@ -24,13 +23,17 @@ import (
 
 	openchoreov1alpha1 "github.com/openchoreo/openchoreo/api/v1alpha1"
 	"github.com/openchoreo/openchoreo/internal/controller"
+	componentpipeline "github.com/openchoreo/openchoreo/internal/crd-renderer/component-pipeline"
+	pipelinecontext "github.com/openchoreo/openchoreo/internal/crd-renderer/component-pipeline/context"
+	dpkubernetes "github.com/openchoreo/openchoreo/internal/dataplane/kubernetes"
 	"github.com/openchoreo/openchoreo/internal/labels"
 )
 
 // Reconciler reconciles an EnvSettings object
 type Reconciler struct {
 	client.Client
-	Scheme *runtime.Scheme
+	Scheme   *runtime.Scheme
+	Pipeline *componentpipeline.Pipeline
 }
 
 // +kubebuilder:rbac:groups=openchoreo.dev,resources=envsettings,verbs=get;list;watch;create;update;patch;delete
@@ -38,7 +41,6 @@ type Reconciler struct {
 // +kubebuilder:rbac:groups=openchoreo.dev,resources=envsettings/finalizers,verbs=update
 // +kubebuilder:rbac:groups=openchoreo.dev,resources=componentenvsnapshots,verbs=get;list;watch
 // +kubebuilder:rbac:groups=openchoreo.dev,resources=releases,verbs=get;list;watch;create;update;patch;delete
-// +kubebuilder:rbac:groups="",resources=configmaps,verbs=get;list;watch;create;update;patch;delete
 
 // Reconcile is part of the main kubernetes reconciliation loop
 func (r *Reconciler) Reconcile(ctx context.Context, req ctrl.Request) (result ctrl.Result, rErr error) {
@@ -161,48 +163,91 @@ func (r *Reconciler) validateSnapshot(snapshot *openchoreov1alpha1.ComponentEnvS
 	return nil
 }
 
+// buildMetadataContext creates the MetadataContext from snapshot.
+// This is where the controller computes K8s resource names and namespaces.
+func (r *Reconciler) buildMetadataContext(
+	snapshot *openchoreov1alpha1.ComponentEnvSnapshot,
+) pipelinecontext.MetadataContext {
+	// Extract information
+	organizationName := snapshot.Namespace
+	projectName := snapshot.Spec.Owner.ProjectName
+	componentName := snapshot.Spec.Owner.ComponentName
+	environment := snapshot.Spec.Environment
+
+	// Generate base name using platform naming conventions
+	// Format: {component}-{env}-{hash}
+	// Example: "payment-service-dev-a1b2c3d4"
+	baseName := dpkubernetes.GenerateK8sName(componentName, environment)
+
+	// Generate namespace using platform naming conventions
+	// Format: dp-{org}-{project}-{env}-{hash}
+	// Example: "dp-acme-corp-payment-dev-x1y2z3w4"
+	namespace := dpkubernetes.GenerateK8sNameWithLengthLimit(
+		dpkubernetes.MaxNamespaceNameLength,
+		"dp", organizationName, projectName, environment,
+	)
+
+	// Build standard labels
+	standardLabels := map[string]string{
+		labels.LabelKeyOrganizationName: organizationName,
+		labels.LabelKeyProjectName:      projectName,
+		labels.LabelKeyComponentName:    componentName,
+		labels.LabelKeyEnvironmentName:  environment,
+	}
+
+	// Build pod selectors (used for Deployment selectors, Service selectors, etc.)
+	podSelectors := map[string]string{
+		"openchoreo.org/component":   componentName,
+		"openchoreo.org/environment": environment,
+		"openchoreo.org/project":     projectName,
+	}
+
+	// Add component ID if available
+	if snapshot.Spec.Component.UID != "" {
+		podSelectors["openchoreo.org/component-id"] = string(snapshot.Spec.Component.UID)
+	}
+
+	return pipelinecontext.MetadataContext{
+		Name:         baseName,
+		Namespace:    namespace,
+		Labels:       standardLabels,
+		Annotations:  map[string]string{}, // Can be extended later
+		PodSelectors: podSelectors,
+	}
+}
+
 // reconcileRelease creates or updates the Release resource
-func (r *Reconciler) reconcileRelease(ctx context.Context, envSettings *openchoreov1alpha1.EnvSettings, snapshot *openchoreov1alpha1.ComponentEnvSnapshot) error { //nolint:unparam // snapshot will be used when rendering pipeline is implemented
+func (r *Reconciler) reconcileRelease(ctx context.Context, envSettings *openchoreov1alpha1.EnvSettings, snapshot *openchoreov1alpha1.ComponentEnvSnapshot) error {
 	logger := log.FromContext(ctx)
 
-	// TODO: Use envSettings and snapshot data to generate actual resources.
-	// This is a simplified implementation that creates a sample ConfigMap.
-	// In production, this should use the rendering pipeline to generate resources.
+	// Build MetadataContext with computed names
+	metadataContext := r.buildMetadataContext(snapshot)
 
-	// Create a sample ConfigMap resource
-	configMap := &corev1.ConfigMap{
-		TypeMeta: metav1.TypeMeta{
-			APIVersion: "v1",
-			Kind:       "ConfigMap",
-		},
-		ObjectMeta: metav1.ObjectMeta{
-			Name:      fmt.Sprintf("%s-config", envSettings.Spec.Owner.ComponentName),
-			Namespace: envSettings.Namespace,
-		},
-		Data: map[string]string{
-			"component":   envSettings.Spec.Owner.ComponentName,
-			"environment": envSettings.Spec.Environment,
-			"project":     envSettings.Spec.Owner.ProjectName,
-			"message":     "Sample ConfigMap from EnvSettings controller",
-		},
+	// Prepare RenderInput
+	renderInput := &componentpipeline.RenderInput{
+		Snapshot: snapshot,
+		Settings: envSettings,
+		Metadata: metadataContext,
 	}
 
-	// Marshal the ConfigMap to RawExtension
-	configMapBytes, err := json.Marshal(configMap)
+	// Render resources using the pipeline
+	renderOutput, err := r.Pipeline.Render(renderInput)
 	if err != nil {
-		msg := fmt.Sprintf("Failed to marshal resources: %v", err)
+		msg := fmt.Sprintf("Failed to render resources: %v", err)
 		controller.MarkFalseCondition(envSettings, ConditionReady,
 			ReasonRenderingFailed, msg)
-		return fmt.Errorf("failed to marshal configmap: %w", err)
+		logger.Error(err, "Failed to render resources")
+		return fmt.Errorf("failed to render resources: %w", err)
 	}
 
-	// Prepare Release resources
-	releaseResources := []openchoreov1alpha1.Resource{
-		{
-			ID:     "sample-configmap",
-			Object: &runtime.RawExtension{Raw: configMapBytes},
-		},
+	// Log warnings if any
+	if len(renderOutput.Metadata.Warnings) > 0 {
+		logger.Info("Rendering completed with warnings",
+			"warnings", renderOutput.Metadata.Warnings)
 	}
+
+	// Convert rendered resources to Release format
+	releaseResources := r.convertToReleaseResources(renderOutput.Resources)
 
 	// Create or update Release
 	release := &openchoreov1alpha1.Release{
@@ -276,6 +321,49 @@ func (r *Reconciler) reconcileRelease(ctx context.Context, envSettings *openchor
 	}
 
 	return nil
+}
+
+// convertToReleaseResources converts unstructured resources to Release.Resource format
+func (r *Reconciler) convertToReleaseResources(
+	resources []map[string]any,
+) []openchoreov1alpha1.Resource {
+	releaseResources := make([]openchoreov1alpha1.Resource, 0, len(resources))
+
+	for i, resource := range resources {
+		// Generate resource ID
+		id := r.generateResourceID(resource, i)
+
+		// Convert map to unstructured.Unstructured
+		unstructuredObj := &unstructured.Unstructured{
+			Object: resource,
+		}
+
+		// Create RawExtension
+		rawExt := &runtime.RawExtension{}
+		rawExt.Object = unstructuredObj
+
+		releaseResources = append(releaseResources, openchoreov1alpha1.Resource{
+			ID:     id,
+			Object: rawExt,
+		})
+	}
+
+	return releaseResources
+}
+
+// generateResourceID creates a unique ID for a resource
+// Format: {kind-lower}-{name}
+func (r *Reconciler) generateResourceID(resource map[string]any, index int) string {
+	kind, _ := resource["kind"].(string)
+	metadata, _ := resource["metadata"].(map[string]any)
+	name, _ := metadata["name"].(string)
+
+	if kind != "" && name != "" {
+		return fmt.Sprintf("%s-%s", strings.ToLower(kind), name)
+	}
+
+	// Fallback: use index
+	return fmt.Sprintf("resource-%d", index)
 }
 
 // isOwnedByEnvSettings checks if the Release is owned by the given EnvSettings

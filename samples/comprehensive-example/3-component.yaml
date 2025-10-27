@@ -1,0 +1,32 @@
+apiVersion: openchoreo.dev/v1alpha1
+kind: Component
+metadata:
+  name: demo-api
+  namespace: demo-org
+spec:
+  owner:
+    projectName: demo-project
+
+  componentType: deployment/web-service
+
+  parameters:
+    replicas: 2
+    imagePullPolicy: "Always"
+    port: 8080
+    resources:
+      requests:
+        cpu: "200m"
+        memory: "512Mi"
+      limits:
+        cpu: "1000m"
+        memory: "1Gi"
+
+  addons:
+    - name: persistent-volume
+      instanceId: data-storage
+      config:
+        volumeName: app-data
+        mountPath: /var/data
+        containerName: app
+        size: "20Gi"
+        storageClass: "fast"

@@ -1,0 +1,26 @@
+apiVersion: openchoreo.dev/v1alpha1
+kind: EnvSettings
+metadata:
+  name: demo-api-development
+  namespace: demo-org
+spec:
+  owner:
+    projectName: demo-project
+    componentName: demo-api
+
+  environment: development
+
+  overrides:
+    resources:
+      requests:
+        cpu: "50m"
+        memory: "128Mi"
+      limits:
+        cpu: "200m"
+        memory: "256Mi"
+
+  addonOverrides:
+    persistent-volume:
+      data-storage:
+        size: "5Gi"
+        storageClass: "standard"

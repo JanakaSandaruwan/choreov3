@@ -7,8 +7,9 @@ import (
 	"encoding/json"
 	"testing"
 
-	"github.com/openchoreo/openchoreo/api/v1alpha1"
 	"sigs.k8s.io/yaml"
+
+	"github.com/openchoreo/openchoreo/api/v1alpha1"
 )
 
 func TestBuildComponentContext(t *testing.T) {
@@ -175,8 +176,12 @@ spec:
 		t.Run(tt.name, func(t *testing.T) {
 			// Build input from YAML
 			input := &ComponentContextInput{
-				Environment:        tt.environment,
-				AdditionalMetadata: tt.additionalMetadata,
+				Environment: tt.environment,
+				Metadata: MetadataContext{
+					Name:      "test-component-dev-12345678",
+					Namespace: "test-namespace",
+					Labels:    tt.additionalMetadata,
+				},
 			}
 
 			// Parse component
@@ -384,8 +389,12 @@ spec:
 		t.Run(tt.name, func(t *testing.T) {
 			// Build input from YAML
 			input := &AddonContextInput{
-				Environment:        tt.environment,
-				AdditionalMetadata: tt.additionalMetadata,
+				Environment: tt.environment,
+				Metadata: MetadataContext{
+					Name:      "test-component-dev-12345678",
+					Namespace: "test-namespace",
+					Labels:    tt.additionalMetadata,
+				},
 			}
 
 			// Parse addon

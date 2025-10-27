@@ -36,6 +36,14 @@ func BuildAddonContext(input *AddonContextInput) (map[string]any, error) {
 		return nil, fmt.Errorf("component is nil")
 	}
 
+	// Validate metadata is provided
+	if input.Metadata.Name == "" {
+		return nil, fmt.Errorf("metadata.name is required")
+	}
+	if input.Metadata.Namespace == "" {
+		return nil, fmt.Errorf("metadata.namespace is required")
+	}
+
 	ctx := make(map[string]any)
 
 	// 1. Build and apply schema for defaulting
@@ -96,10 +104,22 @@ func BuildAddonContext(input *AddonContextInput) (map[string]any, error) {
 		ctx["environment"] = input.Environment
 	}
 
-	// 8. Add additional metadata
-	if len(input.AdditionalMetadata) > 0 {
-		ctx["metadata"] = input.AdditionalMetadata
+	// 8. Add structured metadata for resource generation
+	// This is what templates and patches use via ${metadata.name}, ${metadata.namespace}, etc.
+	metadataMap := map[string]any{
+		"name":      input.Metadata.Name,
+		"namespace": input.Metadata.Namespace,
 	}
+	if len(input.Metadata.Labels) > 0 {
+		metadataMap["labels"] = input.Metadata.Labels
+	}
+	if len(input.Metadata.Annotations) > 0 {
+		metadataMap["annotations"] = input.Metadata.Annotations
+	}
+	if len(input.Metadata.PodSelectors) > 0 {
+		metadataMap["podSelectors"] = input.Metadata.PodSelectors
+	}
+	ctx["metadata"] = metadataMap
 
 	return ctx, nil
 }

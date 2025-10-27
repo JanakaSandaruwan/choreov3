@@ -1,12 +1,71 @@
-# Schema Shorthand Reference
+# Schema Extractor
 
-This package converts a compact, YAML-oriented schema syntax into Kubernetes-compatible OpenAPI v3 JSON schemas. Controllers and rendering tooling can rely on the same shorthand used in our design examples to describe configuration parameters without writing verbose OpenAPI.
+This package converts compact schema shorthand syntax into Kubernetes OpenAPI v3 JSON schemas, making it easy to define configuration parameters without writing verbose schema definitions.
+
+## Quick Example
+
+**Input** (shorthand YAML):
+```yaml
+name: string
+replicas: 'integer | default=1'
+environment: 'string | enum=dev,staging,prod | default=dev'
+description: 'string | default=""'
+```
+
+**Output** (OpenAPI v3 JSON Schema):
+```json
+{
+  "type": "object",
+  "required": ["name"],
+  "properties": {
+    "name": {
+      "type": "string"
+    },
+    "replicas": {
+      "type": "integer",
+      "default": 1
+    },
+    "environment": {
+      "type": "string",
+      "default": "dev",
+      "enum": ["dev", "staging", "prod"]
+    },
+    "description": {
+      "type": "string",
+      "default": ""
+    }
+  }
+}
+```
+
+## Usage
+
+```go
+import "github.com/wso2/openchoreo/internal/crd-renderer/schemaextractor"
+
+// Define your schema using the shorthand syntax
+fields := map[string]any{
+    "name":        "string",
+    "replicas":    "integer | default=1",
+    "environment": "string | enum=dev,staging,prod | default=dev",
+    "description": `string | default=""`,
+}
+
+// Convert to OpenAPI v3 JSON Schema
+converter := schemaextractor.NewConverter(nil)
+schema, err := converter.Convert(fields)
+if err != nil {
+    // handle error
+}
+
+// Use the generated schema for validation, CRD generation, etc.
+```
 
 ## Syntax Overview
 
 - **Primitive types** – `string`, `integer`, `number`, `boolean`, `object`, `[]string`, `map<string>`.
 - **Custom types** – reference a named entry declared under `definition.Types` (e.g. `[]MountConfig`).
-- **Constraints** – append `|`-separated markers:  
+- **Constraints** – append `|`-separated markers:
   `string | required=true | default=foo | pattern=^[a-z]+$`.
   Only the first `|` (between the type and the constraint section) is required; subsequent markers can be space- or pipe-separated (`string | required=true default=foo` works).
 - **Required by default** – fields are considered required unless they declare `default=` or `required=false`.
