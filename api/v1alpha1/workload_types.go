@@ -25,10 +25,10 @@ type FileVar struct {
 	// +optional
 	Value string `json:"value,omitempty"`
 
-	// Reference to a secret key for the file content.
+	// Extract the environment variable value from another resource.
 	// Mutually exclusive with value.
 	// +optional
-	SecretKeyRef *SecretKeyRef `json:"secretKeyRef,omitempty"`
+	ValueFrom *EnvVarValueFrom `json:"valueFrom,omitempty"`
 }
 
 // Container represents a single container in the workload.

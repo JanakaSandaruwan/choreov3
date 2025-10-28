@@ -8,6 +8,17 @@ import (
 	"k8s.io/apimachinery/pkg/runtime"
 )
 
+// EnvConfigurationOverrides defines environment-specific configuration overrides.
+type EnvConfigurationOverrides struct {
+	// Environment variable overrides s
+	// +optional
+	Env []EnvVar `json:"env,omitempty"`
+
+	// File configuration overrides
+	// +optional
+	Files []FileVar `json:"file,omitempty"`
+}
+
 // EnvSettingsSpec defines the desired state of EnvSettings.
 type EnvSettingsSpec struct {
 	// Owner identifies the component this settings applies to
@@ -29,6 +40,11 @@ type EnvSettingsSpec struct {
 	// Structure: map[addonName]map[instanceId]overrideValues
 	// +optional
 	AddonOverrides map[string]map[string]runtime.RawExtension `json:"addonOverrides,omitempty"`
+
+	// ConfigurationOverrides provides environment-specific overrides for workload configurations
+	// These values override or add to the configurations defined in the workload.yaml
+	// +optional
+	ConfigurationOverrides *EnvConfigurationOverrides `json:"configurationOverrides,omitempty"`
 }
 
 // EnvSettingsOwner identifies the component this EnvSettings applies to

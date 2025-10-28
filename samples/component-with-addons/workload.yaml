@@ -12,3 +12,13 @@ spec:
   containers:
     app:
       image: nginx:latest
+      env:
+        - key: LOG_LEVEL
+          value: info
+      file:
+        - key: application.toml
+          mountPath: /tmp
+          value: |
+            schema_generation:
+              enable: true 
+    
