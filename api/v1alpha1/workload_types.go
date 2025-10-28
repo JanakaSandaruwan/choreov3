@@ -10,6 +10,27 @@ import (
 // EDIT THIS FILE!  THIS IS SCAFFOLDING FOR YOU TO OWN!
 // NOTE: json tags are required.  Any new fields you add must have json tags for the fields to be serialized.
 
+// FileVar represents a file configuration in a container.
+type FileVar struct {
+	// The file key/name.
+	// +kubebuilder:validation:Required
+	Key string `json:"key"`
+
+	// The mount path where the file will be mounted.
+	// +kubebuilder:validation:Required
+	MountPath string `json:"mountPath"`
+
+	// The literal content of the file.
+	// Mutually exclusive with secretKeyRef.
+	// +optional
+	Value string `json:"value,omitempty"`
+
+	// Reference to a secret key for the file content.
+	// Mutually exclusive with value.
+	// +optional
+	SecretKeyRef *SecretKeyRef `json:"secretKeyRef,omitempty"`
+}
+
 // Container represents a single container in the workload.
 type Container struct {
 	// OCI image to run (digest or tag).
@@ -26,6 +47,10 @@ type Container struct {
 	// Explicit environment variables.
 	// +optional
 	Env []EnvVar `json:"env,omitempty"`
+
+	// File configurations.
+	// +optional
+	File []FileVar `json:"file,omitempty"`
 }
 
 // WorkloadEndpoint represents a simple network endpoint for basic exposure.
