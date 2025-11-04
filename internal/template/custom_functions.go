@@ -67,6 +67,7 @@ func (o *omitCELValue) Value() interface{} {
 //   - oc_omit(): Returns a sentinel value that causes the field to be removed from output
 //   - oc_merge(map1, map2, ...mapN): Merges multiple maps, with later maps overriding earlier ones
 //   - oc_generate_name(...strings): Generates a valid K8s resource name with hash suffix for uniqueness
+//   - oc_hash(string): Generates an 8-character hex hash of the input string using FNV-1a
 //
 // All custom functions use the "oc_" prefix to avoid potential conflicts with upstream CEL-go.
 func CustomFunctions() []cel.EnvOption {
@@ -100,8 +101,8 @@ func CustomFunctions() []cel.EnvOption {
 				cel.UnaryBinding(generateK8sName),
 			),
 		),
-		cel.Function("hash",
-			cel.Overload("hash_string", []*cel.Type{cel.StringType}, cel.StringType,
+		cel.Function("oc_hash",
+			cel.Overload("oc_hash_string", []*cel.Type{cel.StringType}, cel.StringType,
 				cel.UnaryBinding(func(arg ref.Val) ref.Val {
 					input := arg.Value().(string)
 					h := fnv.New32a()
