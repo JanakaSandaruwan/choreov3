@@ -183,3 +183,27 @@ func (req *UpdateBindingRequest) Validate() error {
 	}
 	return nil
 }
+
+// EnvVarRequest represents an environment variable in a request
+type EnvVarRequest struct {
+	Key       string            `json:"key"`
+	Value     string            `json:"value,omitempty"`
+	SecretRef *SecretRefDetails `json:"secretRef,omitempty"`
+}
+
+// FileConfigurationRequest represents a file configuration in a request
+type FileConfigurationRequest struct {
+	Key       string            `json:"key"`
+	MountPath string            `json:"mountPath"`
+	Content   string            `json:"content,omitempty"`
+	SecretRef *SecretRefDetails `json:"secretRef,omitempty"`
+}
+
+// UpsertConfigurationRequest represents the request to upsert configurations
+type UpsertConfigurationRequest struct {
+	// Environment variables to add or update
+	Env []EnvVarRequest `json:"env,omitempty"`
+
+	// File configurations to add or update
+	Files []FileConfigurationRequest `json:"files,omitempty"`
+}

@@ -102,6 +102,11 @@ func (h *Handler) Routes() http.Handler {
 	mux.HandleFunc("POST "+v1+"/orgs/{orgName}/projects/{projectName}/components/{componentName}/workloads", h.CreateWorkload)
 	mux.HandleFunc("GET "+v1+"/orgs/{orgName}/projects/{projectName}/components/{componentName}/workloads", h.GetWorkloads)
 
+	// Configuration endpoints (component + environment scoped)
+	mux.HandleFunc("GET "+v1+"/orgs/{orgName}/projects/{projectName}/components/{componentName}/env/{envName}/configurations", h.GetConfigurations)
+	mux.HandleFunc("POST "+v1+"/orgs/{orgName}/projects/{projectName}/components/{componentName}/env/{envName}/configurations", h.UpsertConfigurations)
+	mux.HandleFunc("DELETE "+v1+"/orgs/{orgName}/projects/{projectName}/components/{componentName}/env/{envName}/configurations", h.DeleteConfigurations)
+
 	// MCP endpoint
 	toolsets := getMCPServerToolsets(h)
 	mux.Handle("/mcp", mcp.NewHTTPServer(toolsets))

@@ -266,3 +266,33 @@ type AddonResponse struct {
 	Description string    `json:"description,omitempty"`
 	CreatedAt   time.Time `json:"createdAt"`
 }
+
+// ConfigurationResponse represents configurations for a component in an environment
+type ConfigurationResponse struct {
+	// Environment variables
+	Env []EnvVarResponse `json:"env"`
+
+	// File configurations
+	Files []FileConfigurationResponse `json:"files"`
+}
+
+// EnvVarResponse represents an environment variable in the response
+type EnvVarResponse struct {
+	Key       string            `json:"key"`
+	Value     string            `json:"value,omitempty"`
+	SecretRef *SecretRefDetails `json:"secretRef,omitempty"`
+}
+
+// FileConfigurationResponse represents a file configuration in the response
+type FileConfigurationResponse struct {
+	Key       string            `json:"key"`
+	MountPath string            `json:"mountPath"`
+	Value     string            `json:"value,omitempty"` // base64 encoded content
+	SecretRef *SecretRefDetails `json:"secretRef,omitempty"`
+}
+
+// SecretRefDetails represents a reference to a secret
+type SecretRefDetails struct {
+	Name string `json:"name"`
+	Key  string `json:"key"`
+}

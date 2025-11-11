@@ -21,6 +21,7 @@ type Services struct {
 	BuildService              *BuildService
 	BuildPlaneService         *BuildPlaneService
 	DeploymentPipelineService *DeploymentPipelineService
+	ConfigurationService      *ConfigurationService
 	k8sClient                 client.Client // Direct access to K8s client for apply operations
 }
 
@@ -56,6 +57,9 @@ func NewServices(k8sClient client.Client, k8sBPClientMgr *kubernetesClient.KubeM
 	// Create Addon service
 	addonService := NewAddonService(k8sClient, logger.With("service", "addon"))
 
+	// Create Configuration service
+	configurationService := NewConfigurationService(k8sClient, logger.With("service", "configuration"))
+
 	return &Services{
 		ProjectService:            projectService,
 		ComponentService:          componentService,
@@ -67,6 +71,7 @@ func NewServices(k8sClient client.Client, k8sBPClientMgr *kubernetesClient.KubeM
 		BuildService:              buildService,
 		BuildPlaneService:         buildPlaneService,
 		DeploymentPipelineService: deploymentPipelineService,
+		ConfigurationService:      configurationService,
 		k8sClient:                 k8sClient,
 	}
 }
