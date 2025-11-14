@@ -3,7 +3,7 @@ kind: Workflow
 metadata:
   name: docker
   annotations:
-    openchoreo.dev/description: "Docker build workflow for containerized builds using Dockerfile"
+    openchoreo.dev/description: "Ballerina build workflow for containerized builds using Ballerina Buildpack"
 spec:
   # Template Variable Reference (processed by controller):
   # ${ctx.workflowRunName}         - WorkflowRun CR name
@@ -20,9 +20,6 @@ spec:
         commit: string | default=""
       appPath: string | default=.
       secretRef: string
-    docker:
-      context: string | default=.
-      filePath: string | default=./Dockerfile
 
   # Secret references to inject into build plane
   secrets:
@@ -51,15 +48,7 @@ spec:
             value: ${schema.repository.revision.commit}
           - name: app-path
             value: ${schema.repository.appPath}
-          - name: docker-context
-            value: ${schema.docker.context}
-          - name: dockerfile-path
-            value: ${schema.docker.filePath}
           # PE-controlled hardcoded parameters
-          - name: registry-url
-            value: gcr.io/openchoreo-dev/images
-          - name: build-timeout
-            value: "30m"
           - name: image-name
             value: ${ctx.projectName}-${ctx.componentName}-image
           - name: image-tag
@@ -67,5 +56,5 @@ spec:
       serviceAccountName: workflow-sa
       workflowTemplateRef:
         clusterScope: true
-        name: docker
+        name: ballerina-buildpack
         
