@@ -289,6 +289,308 @@ envMap: '${parameters.envVars.transformMapEntry(_, v, {v.name: v.value})}'
 `,
 		},
 		{
+			name: "configurations.envFrom with configs and secrets",
+			template: `
+envFrom: '${configurations["main"].envFrom("my-app")}'
+`,
+			inputs: `{
+  "configurations": {
+    "main": {
+      "configs": {
+        "envs": [
+          {"name": "PORT", "value": "8080"},
+          {"name": "HOST", "value": "0.0.0.0"}
+        ]
+      },
+      "secrets": {
+        "envs": [
+          {"name": "DB_PASSWORD", "remoteRef": {"key": "db-secret", "property": "password"}}
+        ]
+      }
+    }
+  }
+}`,
+			want: `envFrom:
+- configMapRef:
+    name: my-app-env-configs-28a539d2
+- secretRef:
+    name: my-app-env-secrets-67a4eb73
+`,
+		},
+		{
+			name: "configurations.envFrom with only configs",
+			template: `
+envFrom: '${configurations["main"].envFrom("my-app")}'
+`,
+			inputs: `{
+  "configurations": {
+    "main": {
+      "configs": {
+        "envs": [
+          {"name": "PORT", "value": "8080"}
+        ]
+      },
+      "secrets": {
+        "envs": []
+      }
+    }
+  }
+}`,
+			want: `envFrom:
+- configMapRef:
+    name: my-app-env-configs-28a539d2
+`,
+		},
+		{
+			name: "configurations.envFrom with empty configurations",
+			template: `
+envFrom: '${configurations["main"].envFrom("my-app")}'
+`,
+			inputs: `{
+  "configurations": {
+    "main": {
+      "configs": {
+        "envs": []
+      },
+      "secrets": {
+        "envs": []
+      }
+    }
+  }
+}`,
+			want: `envFrom: []
+`,
+		},
+		{
+			name: "configurations.envFrom with dynamic container name",
+			template: `
+envFrom: '${configurations[parameters.containerName].envFrom(metadata.name)}'
+`,
+			inputs: `{
+  "parameters": {
+    "containerName": "app"
+  },
+  "metadata": {
+    "name": "test-service"
+  },
+  "configurations": {
+    "app": {
+      "configs": {
+        "envs": [
+          {"name": "ENV", "value": "production"}
+        ]
+      },
+      "secrets": {
+        "envs": []
+      }
+    }
+  }
+}`,
+			want: `envFrom:
+- configMapRef:
+    name: test-service-env-configs-a2215b19
+`,
+		},
+		{
+			name: "configurations.volumeMounts with configs and secrets files",
+			template: `
+volumeMounts: '${configurations["main"].volumeMounts()}'
+`,
+			inputs: `{
+  "configurations": {
+    "main": {
+      "configs": {
+        "files": [
+          {"name": "app.properties", "mountPath": "/etc/config"},
+          {"name": "config.yaml", "mountPath": "/etc/app"}
+        ]
+      },
+      "secrets": {
+        "files": [
+          {"name": "tls.crt", "mountPath": "/etc/tls"},
+          {"name": "private.key", "mountPath": "/etc/secrets"}
+        ]
+      }
+    }
+  }
+}`,
+			want: `volumeMounts:
+- name: file-mount-d08babc2
+  mountPath: /etc/config/app.properties
+  subPath: app.properties
+- name: file-mount-02a7dd74
+  mountPath: /etc/app/config.yaml
+  subPath: config.yaml
+- name: file-mount-9b2ef275
+  mountPath: /etc/tls/tls.crt
+  subPath: tls.crt
+- name: file-mount-fb72c5e3
+  mountPath: /etc/secrets/private.key
+  subPath: private.key
+`,
+		},
+		{
+			name: "configurations.volumeMounts with only config files",
+			template: `
+volumeMounts: '${configurations["main"].volumeMounts()}'
+`,
+			inputs: `{
+  "configurations": {
+    "main": {
+      "configs": {
+        "files": [
+          {"name": "settings.json", "mountPath": "/etc/app"}
+        ]
+      },
+      "secrets": {
+        "files": []
+      }
+    }
+  }
+}`,
+			want: `volumeMounts:
+- name: file-mount-4706efc4
+  mountPath: /etc/app/settings.json
+  subPath: settings.json
+`,
+		},
+		{
+			name: "configurations.volumeMounts with empty configurations",
+			template: `
+volumeMounts: '${configurations["main"].volumeMounts()}'
+`,
+			inputs: `{
+  "configurations": {
+    "main": {
+      "configs": {
+        "files": []
+      },
+      "secrets": {
+        "files": []
+      }
+    }
+  }
+}`,
+			want: `volumeMounts: []
+`,
+		},
+		{
+			name: "configurations.volumeMounts with dynamic container name",
+			template: `
+volumeMounts: '${configurations[parameters.containerName].volumeMounts()}'
+`,
+			inputs: `{
+  "parameters": {
+    "containerName": "web"
+  },
+  "configurations": {
+    "web": {
+      "configs": {
+        "files": [
+          {"name": "nginx.conf", "mountPath": "/etc/nginx"}
+        ]
+      },
+      "secrets": {
+        "files": [
+          {"name": "ssl.crt", "mountPath": "/etc/ssl"}
+        ]
+      }
+    }
+  }
+}`,
+			want: `volumeMounts:
+- name: file-mount-20f6e598
+  mountPath: /etc/nginx/nginx.conf
+  subPath: nginx.conf
+- name: file-mount-8963bc91
+  mountPath: /etc/ssl/ssl.crt
+  subPath: ssl.crt
+`,
+		},
+		{
+			name: "configurations.volumes with configs and secrets files",
+			template: `
+volumes: '${configurations["main"].volumes("my-app")}'
+`,
+			inputs: `{
+  "configurations": {
+    "main": {
+      "configs": {
+        "files": [
+          {"name": "app.properties", "mountPath": "/etc/config"},
+          {"name": "config.yaml", "mountPath": "/etc/app"}
+        ]
+      },
+      "secrets": {
+        "files": [
+          {"name": "tls.crt", "mountPath": "/etc/tls"},
+          {"name": "private.key", "mountPath": "/etc/secrets"}
+        ]
+      }
+    }
+  }
+}`,
+			want: `volumes:
+- name: file-mount-d08babc2
+  configMap:
+    name: my-app-config-app-properties-0ce7d743
+- name: file-mount-02a7dd74
+  configMap:
+    name: my-app-config-config-yaml-e5fb75dc
+- name: file-mount-9b2ef275
+  secret:
+    secretName: my-app-secret-tls-crt-a1198bcf
+- name: file-mount-fb72c5e3
+  secret:
+    secretName: my-app-secret-private-key-4caaf632
+`,
+		},
+		{
+			name: "configurations.volumes with only config files",
+			template: `
+volumes: '${configurations["main"].volumes("test-service")}'
+`,
+			inputs: `{
+  "configurations": {
+    "main": {
+      "configs": {
+        "files": [
+          {"name": "settings.json", "mountPath": "/etc/app"}
+        ]
+      },
+      "secrets": {
+        "files": []
+      }
+    }
+  }
+}`,
+			want: `volumes:
+- name: file-mount-4706efc4
+  configMap:
+    name: test-service-config-settings-json-92ed5bc4
+`,
+		},
+		{
+			name: "configurations.volumes with empty configurations",
+			template: `
+volumes: '${configurations["main"].volumes("my-app")}'
+`,
+			inputs: `{
+  "configurations": {
+    "main": {
+      "configs": {
+        "files": []
+      },
+      "secrets": {
+        "files": []
+      }
+    }
+  }
+}`,
+			want: `volumes: []
+`,
+		},
+		{
 			name: "list concatenation with + operator",
 			template: `
 items: '${parameters.defaults + parameters.custom}'

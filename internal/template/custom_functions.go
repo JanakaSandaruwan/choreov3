@@ -8,6 +8,7 @@ import (
 	"hash/fnv"
 	"maps"
 	"reflect"
+	"strings"
 
 	"github.com/google/cel-go/cel"
 	"github.com/google/cel-go/common"
@@ -104,6 +105,12 @@ func (o *omitCELValue) Value() interface{} {
 //
 // oc_hash(string) - Generate 8-character hash from input string
 //
+// envFrom(metadataName) - Generate envFrom array for container configurations
+//
+// volumeMounts() - Generate volumeMounts array for container file configurations
+//
+// volumes(metadataName) - Generate volumes array for container file configurations
+//
 // # oc_omit() - Conditional Omission
 //
 // Returns a sentinel value that is removed during post-processing. Supports two use cases:
@@ -181,7 +188,149 @@ func (o *omitCELValue) Value() interface{} {
 //	oc_hash("test")  -> "4fdcca5d"  # Always produces this hash
 //	oc_hash("test")  -> "4fdcca5d"  # Same input, same output
 //
+// # envFrom() - Generate EnvFrom Configuration
+//
+// Generates envFrom entries for Kubernetes container specifications based on configurations.
+// This function simplifies the creation of configMapRef and secretRef entries by automatically
+// checking the configurations structure and generating appropriate references.
+//
+// Usage: ${configurations["containerName"].envFrom(metadataName)}
+//
+// Parameters:
+//   - metadataName: The metadata name used for generating ConfigMap and Secret names
+//
+// Returns: An array of envFrom entries containing configMapRef and/or secretRef as needed
+//
+// Example usage:
+//
+//	# Simple usage in Deployment container spec
+//	envFrom: ${configurations[parameters.containerName].envFrom(metadata.name)}
+//	
+//	# Or with literal container name
+//	envFrom: ${configurations["main"].envFrom(metadata.name)}
+//
+//	# Replaces complex manual logic:
+//	envFrom: |
+//	  ${(has(configurations[parameters.containerName].configs.envs) && configurations[parameters.containerName].configs.envs.size() > 0 ?
+//	    [{"configMapRef": {"name": oc_generate_name(metadata.name, "env-configs")}}] : []) +
+//	   (has(configurations[parameters.containerName].secrets.envs) && configurations[parameters.containerName].secrets.envs.size() > 0 ?
+//	    [{"secretRef": {"name": oc_generate_name(metadata.name, "env-secrets")}}] : [])}
+//
+// Behavior:
+//   - Returns configMapRef entry if container.configs.envs has items
+//   - Returns secretRef entry if container.secrets.envs has items
+//   - Returns empty array if no environment configurations exist
+//   - Returns empty array if container configuration is invalid
+//
+// Generated names follow the same pattern as oc_generate_name():
+//   - ConfigMap: {metadataName}-env-configs-{8-char-hash}
+//   - Secret: {metadataName}-env-secrets-{8-char-hash}
+//
+//
+// # volumeMounts() - Generate Volume Mounts Configuration
+//
+// Generates volumeMounts entries for Kubernetes container specifications based on file configurations.
+// This function simplifies the creation of volumeMounts by automatically processing both config files
+// and secret files from the container's configurations.
+//
+// Usage: ${configurations["containerName"].volumeMounts()}
+//
+// Returns: An array of volumeMounts entries for all files in configs.files and secrets.files
+//
+// Example usage:
+//
+//	# Simple usage in Deployment container spec
+//	volumeMounts: ${configurations[parameters.containerName].volumeMounts()}
+//	
+//	# Or with literal container name
+//	volumeMounts: ${configurations["main"].volumeMounts()}
+//
+//	# Replaces complex manual logic:
+//	volumeMounts: |
+//	  ${has(configurations[parameters.containerName].configs.files) && configurations[parameters.containerName].configs.files.size() > 0 || has(configurations[parameters.containerName].secrets.files) && configurations[parameters.containerName].secrets.files.size() > 0 ?
+//	    (has(configurations[parameters.containerName].configs.files) && configurations[parameters.containerName].configs.files.size() > 0 ?
+//	      configurations[parameters.containerName].configs.files.map(f, {
+//	        "name": "file-mount-"+oc_hash(f.mountPath+"/"+f.name),
+//	        "mountPath": f.mountPath+"/"+f.name,
+//	        "subPath": f.name
+//	      }) : []) +
+//	     (has(configurations[parameters.containerName].secrets.files) && configurations[parameters.containerName].secrets.files.size() > 0 ?
+//	      configurations[parameters.containerName].secrets.files.map(f, {
+//	        "name": "file-mount-"+oc_hash(f.mountPath+"/"+f.name),
+//	        "mountPath": f.mountPath+"/"+f.name,
+//	        "subPath": f.name
+//	      }) : [])
+//	  : oc_omit()}
+//
+// Behavior:
+//   - Processes all files from container.configs.files and container.secrets.files
+//   - Generates volume mount entries with proper name, mountPath, and subPath
+//   - Volume names use "file-mount-" prefix + hash of (mountPath+"/"+fileName)
+//   - Returns empty array if no file configurations exist
+//   - Returns empty array if container configuration is invalid
+//
+// Generated volumeMounts structure:
+//   - name: "file-mount-{8-char-hash}"  # Hash of mountPath+"/"+fileName
+//   - mountPath: "{f.mountPath}/{f.name}"  # Full path where file should be mounted
+//   - subPath: "{f.name}"  # File name within the volume
+//
+// # volumes() - Generate Volumes Configuration
+//
+// Generates volumes entries for Kubernetes pod specifications based on file configurations.
+// This function simplifies the creation of volumes by automatically processing both config files
+// and secret files from the container's configurations and generating the appropriate configMap
+// and secret volume entries.
+//
+// Usage: ${configurations["containerName"].volumes(metadataName)}
+//
+// Parameters:
+//   - metadataName: The metadata name used for generating ConfigMap and Secret names
+//
+// Returns: An array of volumes entries for all files in configs.files and secrets.files
+//
+// Example usage:
+//
+//	# Simple usage in Deployment pod spec
+//	volumes: ${configurations[parameters.containerName].volumes(metadata.name)}
+//	
+//	# Or with literal container name
+//	volumes: ${configurations["main"].volumes(metadata.name)}
+//
+//	# Replaces complex manual logic:
+//	volumes: |
+//	  ${has(configurations[parameters.containerName].configs.files) && configurations[parameters.containerName].configs.files.size() > 0 || has(configurations[parameters.containerName].secrets.files) && configurations[parameters.containerName].secrets.files.size() > 0 ?
+//	    (has(configurations[parameters.containerName].configs.files) && configurations[parameters.containerName].configs.files.size() > 0 ?
+//	      configurations[parameters.containerName].configs.files.map(f, {
+//	        "name": "file-mount-"+oc_hash(f.mountPath+"/"+f.name),
+//	        "configMap": {
+//	          "name": oc_generate_name(metadata.name, "config", f.name).replace(".", "-")
+//	        }
+//	      }) : []) +
+//	     (has(configurations[parameters.containerName].secrets.files) && configurations[parameters.containerName].secrets.files.size() > 0 ?
+//	      configurations[parameters.containerName].secrets.files.map(f, {
+//	        "name": "file-mount-"+oc_hash(f.mountPath+"/"+f.name),
+//	        "secret": {
+//	          "secretName": oc_generate_name(metadata.name, "secret", f.name).replace(".", "-")
+//	        }
+//	      }) : [])
+//	  : oc_omit()}
+//
+// Behavior:
+//   - Processes all files from container.configs.files and container.secrets.files
+//   - Generates configMap volume entries for config files
+//   - Generates secret volume entries for secret files
+//   - Volume names use "file-mount-" prefix + hash of (mountPath+"/"+fileName)
+//   - ConfigMap/Secret names use oc_generate_name pattern with dots replaced by hyphens
+//   - Returns empty array if no file configurations exist
+//   - Returns empty array if container configuration is invalid
+//
+// Generated volumes structure:
+//   - name: "file-mount-{8-char-hash}"  # Hash of mountPath+"/"+fileName
+//   - configMap.name: "{metadataName}-config-{fileName}"  # For config files
+//   - secret.secretName: "{metadataName}-secret-{fileName}"  # For secret files
+//
 // All custom functions use the "oc_" prefix to avoid potential conflicts with upstream CEL-go.
+// The envFrom, volumeMounts, and volumes functions are exceptions as they're methods on the configurations object.
 func CustomFunctions() []cel.EnvOption {
 	return []cel.EnvOption{
 		cel.Macros(generateNameMacro, mergeMacro),
@@ -220,6 +369,33 @@ func CustomFunctions() []cel.EnvOption {
 					h := fnv.New32a()
 					h.Write([]byte(input))
 					return types.String(fmt.Sprintf("%08x", h.Sum32()))
+				}),
+			),
+		),
+		cel.Function("envFrom",
+			cel.MemberOverload("container_configurations_envFrom",
+				[]*cel.Type{cel.MapType(cel.StringType, cel.DynType), cel.StringType},
+				cel.ListType(cel.MapType(cel.StringType, cel.DynType)),
+				cel.FunctionBinding(func(values ...ref.Val) ref.Val {
+					return generateEnvFromForContainer(values[0], values[1])
+				}),
+			),
+		),
+		cel.Function("volumeMounts",
+			cel.MemberOverload("container_configurations_volumeMounts",
+				[]*cel.Type{cel.MapType(cel.StringType, cel.DynType)},
+				cel.ListType(cel.MapType(cel.StringType, cel.DynType)),
+				cel.FunctionBinding(func(values ...ref.Val) ref.Val {
+					return generateVolumeMountsForContainer(values[0])
+				}),
+			),
+		),
+		cel.Function("volumes",
+			cel.MemberOverload("container_configurations_volumes",
+				[]*cel.Type{cel.MapType(cel.StringType, cel.DynType), cel.StringType},
+				cel.ListType(cel.MapType(cel.StringType, cel.DynType)),
+				cel.FunctionBinding(func(values ...ref.Val) ref.Val {
+					return generateVolumesForContainer(values[0], values[1])
 				}),
 			),
 		),
@@ -376,3 +552,332 @@ var mergeMacro = cel.GlobalVarArgMacro("oc_merge",
 			return result, nil
 		}
 	})
+
+// generateEnvFromForContainer creates envFrom entries for configMaps and secrets based on container configurations.
+//
+// This function generates the envFrom array that can be used in Kubernetes container specifications
+// to load environment variables from ConfigMaps and Secrets. It takes a single container's configurations
+// and a metadata name to generate the appropriate configMapRef and secretRef entries.
+//
+// Usage: ${configurations["containerName"].envFrom(metadataName)}
+//
+// Parameters:
+//   - containerConfigsVal: The container configuration map containing configs and secrets
+//   - metadataNameVal: The metadata name used for generating resource names
+//
+// Returns: A list of envFrom entries with configMapRef and secretRef as needed
+func generateEnvFromForContainer(containerConfigsVal, metadataNameVal ref.Val) ref.Val {
+	// Convert CEL values to Go types
+	metadataName := metadataNameVal.Value().(string)
+	
+	// Convert container configs to map
+	containerConfigs := make(map[string]any)
+	switch cc := containerConfigsVal.Value().(type) {
+	case map[string]any:
+		containerConfigs = cc
+	case map[ref.Val]ref.Val:
+		for k, v := range cc {
+			containerConfigs[string(k.(types.String))] = v.Value()
+		}
+	default:
+		return types.NewDynamicList(types.DefaultTypeAdapter, []ref.Val{})
+	}
+	
+	var envFromEntries []ref.Val
+	
+	// Check for config envs
+	if configs, hasConfigs := containerConfigs["configs"]; hasConfigs {
+		if configsMap, ok := configs.(map[string]any); ok {
+			if envs, hasEnvs := configsMap["envs"]; hasEnvs {
+				// Check if envs list has items
+				if envsList, ok := envs.([]any); ok && len(envsList) > 0 {
+					// Create configMapRef entry
+					configMapRef := map[ref.Val]ref.Val{
+						types.String("configMapRef"): types.NewDynamicMap(types.DefaultTypeAdapter, map[ref.Val]ref.Val{
+							types.String("name"): generateConfigMapName(metadataName),
+						}),
+					}
+					envFromEntries = append(envFromEntries, types.NewDynamicMap(types.DefaultTypeAdapter, configMapRef))
+				}
+			}
+		}
+	}
+	
+	// Check for secret envs
+	if secrets, hasSecrets := containerConfigs["secrets"]; hasSecrets {
+		if secretsMap, ok := secrets.(map[string]any); ok {
+			if envs, hasEnvs := secretsMap["envs"]; hasEnvs {
+				// Check if envs list has items
+				if envsList, ok := envs.([]any); ok && len(envsList) > 0 {
+					// Create secretRef entry
+					secretRef := map[ref.Val]ref.Val{
+						types.String("secretRef"): types.NewDynamicMap(types.DefaultTypeAdapter, map[ref.Val]ref.Val{
+							types.String("name"): generateSecretName(metadataName),
+						}),
+					}
+					envFromEntries = append(envFromEntries, types.NewDynamicMap(types.DefaultTypeAdapter, secretRef))
+				}
+			}
+		}
+	}
+	
+	return types.NewDynamicList(types.DefaultTypeAdapter, envFromEntries)
+}
+
+// generateVolumeMountsForContainer creates volumeMounts entries for config and secret files.
+//
+// This function generates the volumeMounts array that can be used in Kubernetes container specifications
+// to mount files from ConfigMaps and Secrets. It takes a single container's configurations
+// and generates the appropriate volumeMounts entries for all files.
+//
+// Usage: ${configurations["containerName"].volumeMounts()}
+//
+// Parameters:
+//   - containerConfigsVal: The container configuration map containing configs and secrets
+//
+// Returns: A list of volumeMounts entries for all config and secret files
+func generateVolumeMountsForContainer(containerConfigsVal ref.Val) ref.Val {
+	// Convert container configs to map
+	containerConfigs := make(map[string]any)
+	switch cc := containerConfigsVal.Value().(type) {
+	case map[string]any:
+		containerConfigs = cc
+	case map[ref.Val]ref.Val:
+		for k, v := range cc {
+			containerConfigs[string(k.(types.String))] = v.Value()
+		}
+	default:
+		return types.NewDynamicList(types.DefaultTypeAdapter, []ref.Val{})
+	}
+	
+	var volumeMountEntries []ref.Val
+	
+	// Process config files
+	if configs, hasConfigs := containerConfigs["configs"]; hasConfigs {
+		if configsMap, ok := configs.(map[string]any); ok {
+			if files, hasFiles := configsMap["files"]; hasFiles {
+				if filesList, ok := files.([]any); ok {
+					for _, fileAny := range filesList {
+						if fileMap, ok := fileAny.(map[string]any); ok {
+							volumeMount := generateVolumeMountEntry(fileMap)
+							if volumeMount != nil {
+								volumeMountEntries = append(volumeMountEntries, volumeMount)
+							}
+						}
+					}
+				}
+			}
+		}
+	}
+	
+	// Process secret files
+	if secrets, hasSecrets := containerConfigs["secrets"]; hasSecrets {
+		if secretsMap, ok := secrets.(map[string]any); ok {
+			if files, hasFiles := secretsMap["files"]; hasFiles {
+				if filesList, ok := files.([]any); ok {
+					for _, fileAny := range filesList {
+						if fileMap, ok := fileAny.(map[string]any); ok {
+							volumeMount := generateVolumeMountEntry(fileMap)
+							if volumeMount != nil {
+								volumeMountEntries = append(volumeMountEntries, volumeMount)
+							}
+						}
+					}
+				}
+			}
+		}
+	}
+	
+	return types.NewDynamicList(types.DefaultTypeAdapter, volumeMountEntries)
+}
+
+// generateVolumeMountEntry creates a single volumeMount entry from a file configuration
+func generateVolumeMountEntry(fileMap map[string]any) ref.Val {
+	name, hasName := fileMap["name"]
+	mountPath, hasMountPath := fileMap["mountPath"]
+	
+	if !hasName || !hasMountPath {
+		return nil
+	}
+	
+	nameStr, ok1 := name.(string)
+	mountPathStr, ok2 := mountPath.(string)
+	if !ok1 || !ok2 {
+		return nil
+	}
+	
+	// Generate volume name using hash of mountPath + "/" + fileName
+	fullPath := mountPathStr + "/" + nameStr
+	volumeName := "file-mount-" + generateHashString(fullPath)
+	
+	// Create volumeMount entry
+	volumeMount := map[ref.Val]ref.Val{
+		types.String("name"):      types.String(volumeName),
+		types.String("mountPath"): types.String(fullPath),
+		types.String("subPath"):   types.String(nameStr),
+	}
+	
+	return types.NewDynamicMap(types.DefaultTypeAdapter, volumeMount)
+}
+
+// generateHashString generates an 8-character hash string like oc_hash does
+func generateHashString(input string) string {
+	h := fnv.New32a()
+	h.Write([]byte(input))
+	return fmt.Sprintf("%08x", h.Sum32())
+}
+
+// generateVolumesForContainer creates volumes entries for config and secret files.
+//
+// This function generates the volumes array that can be used in Kubernetes pod specifications
+// to define volumes from ConfigMaps and Secrets. It takes a single container's configurations
+// and generates the appropriate volumes entries for all files.
+//
+// Usage: ${configurations["containerName"].volumes(metadataName)}
+//
+// Parameters:
+//   - containerConfigsVal: The container configuration map containing configs and secrets
+//   - metadataNameVal: The metadata name used for generating resource names
+//
+// Returns: A list of volumes entries for all config and secret files
+func generateVolumesForContainer(containerConfigsVal, metadataNameVal ref.Val) ref.Val {
+	// Convert CEL values to Go types
+	metadataName := metadataNameVal.Value().(string)
+	
+	// Convert container configs to map
+	containerConfigs := make(map[string]any)
+	switch cc := containerConfigsVal.Value().(type) {
+	case map[string]any:
+		containerConfigs = cc
+	case map[ref.Val]ref.Val:
+		for k, v := range cc {
+			containerConfigs[string(k.(types.String))] = v.Value()
+		}
+	default:
+		return types.NewDynamicList(types.DefaultTypeAdapter, []ref.Val{})
+	}
+	
+	var volumeEntries []ref.Val
+	
+	// Process config files
+	if configs, hasConfigs := containerConfigs["configs"]; hasConfigs {
+		if configsMap, ok := configs.(map[string]any); ok {
+			if files, hasFiles := configsMap["files"]; hasFiles {
+				if filesList, ok := files.([]any); ok {
+					for _, fileAny := range filesList {
+						if fileMap, ok := fileAny.(map[string]any); ok {
+							volume := generateConfigMapVolumeEntry(fileMap, metadataName)
+							if volume != nil {
+								volumeEntries = append(volumeEntries, volume)
+							}
+						}
+					}
+				}
+			}
+		}
+	}
+	
+	// Process secret files
+	if secrets, hasSecrets := containerConfigs["secrets"]; hasSecrets {
+		if secretsMap, ok := secrets.(map[string]any); ok {
+			if files, hasFiles := secretsMap["files"]; hasFiles {
+				if filesList, ok := files.([]any); ok {
+					for _, fileAny := range filesList {
+						if fileMap, ok := fileAny.(map[string]any); ok {
+							volume := generateSecretVolumeEntry(fileMap, metadataName)
+							if volume != nil {
+								volumeEntries = append(volumeEntries, volume)
+							}
+						}
+					}
+				}
+			}
+		}
+	}
+	
+	return types.NewDynamicList(types.DefaultTypeAdapter, volumeEntries)
+}
+
+// generateConfigMapVolumeEntry creates a single configMap volume entry from a file configuration
+func generateConfigMapVolumeEntry(fileMap map[string]any, metadataName string) ref.Val {
+	name, hasName := fileMap["name"]
+	mountPath, hasMountPath := fileMap["mountPath"]
+	
+	if !hasName || !hasMountPath {
+		return nil
+	}
+	
+	nameStr, ok1 := name.(string)
+	mountPathStr, ok2 := mountPath.(string)
+	if !ok1 || !ok2 {
+		return nil
+	}
+	
+	// Generate volume name using hash of mountPath + "/" + fileName
+	fullPath := mountPathStr + "/" + nameStr
+	volumeName := "file-mount-" + generateHashString(fullPath)
+	
+	// Generate configMap name using oc_generate_name pattern
+	configMapName := generateK8sNameFromStrings([]string{metadataName, "config", nameStr})
+	// Replace dots with hyphens as shown in the original logic
+	configMapNameStr := configMapName.Value().(string)
+	configMapNameStr = strings.ReplaceAll(configMapNameStr, ".", "-")
+	
+	// Create volume entry
+	volume := map[ref.Val]ref.Val{
+		types.String("name"): types.String(volumeName),
+		types.String("configMap"): types.NewDynamicMap(types.DefaultTypeAdapter, map[ref.Val]ref.Val{
+			types.String("name"): types.String(configMapNameStr),
+		}),
+	}
+	
+	return types.NewDynamicMap(types.DefaultTypeAdapter, volume)
+}
+
+// generateSecretVolumeEntry creates a single secret volume entry from a file configuration
+func generateSecretVolumeEntry(fileMap map[string]any, metadataName string) ref.Val {
+	name, hasName := fileMap["name"]
+	mountPath, hasMountPath := fileMap["mountPath"]
+	
+	if !hasName || !hasMountPath {
+		return nil
+	}
+	
+	nameStr, ok1 := name.(string)
+	mountPathStr, ok2 := mountPath.(string)
+	if !ok1 || !ok2 {
+		return nil
+	}
+	
+	// Generate volume name using hash of mountPath + "/" + fileName
+	fullPath := mountPathStr + "/" + nameStr
+	volumeName := "file-mount-" + generateHashString(fullPath)
+	
+	// Generate secret name using oc_generate_name pattern
+	secretName := generateK8sNameFromStrings([]string{metadataName, "secret", nameStr})
+	// Replace dots with hyphens as shown in the original logic
+	secretNameStr := secretName.Value().(string)
+	secretNameStr = strings.ReplaceAll(secretNameStr, ".", "-")
+	
+	// Create volume entry
+	volume := map[ref.Val]ref.Val{
+		types.String("name"): types.String(volumeName),
+		types.String("secret"): types.NewDynamicMap(types.DefaultTypeAdapter, map[ref.Val]ref.Val{
+			types.String("secretName"): types.String(secretNameStr),
+		}),
+	}
+	
+	return types.NewDynamicMap(types.DefaultTypeAdapter, volume)
+}
+
+// generateConfigMapName generates a ConfigMap name using the same pattern as oc_generate_name
+func generateConfigMapName(metadataName string) ref.Val {
+	result := generateK8sNameFromStrings([]string{metadataName, "env-configs"})
+	return result
+}
+
+// generateSecretName generates a Secret name using the same pattern as oc_generate_name  
+func generateSecretName(metadataName string) ref.Val {
+	result := generateK8sNameFromStrings([]string{metadataName, "env-secrets"})
+	return result
+}
