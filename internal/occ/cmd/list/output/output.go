@@ -311,10 +311,3 @@ func formatAge(t time.Time) string {
 		return fmt.Sprintf("%dd", int(duration.Hours()/24))
 	}
 }
-
-func truncateString(s string, maxLen int) string {
-	if len(s) <= maxLen {
-		return s
-	}
-	return s[:maxLen-3] + "..."
-}
